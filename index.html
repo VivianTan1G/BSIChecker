@@ -263,7 +263,8 @@ input[type=file]{display:none}
 <script>
 // ── Config — hardcoded, no setup needed ───────────────────────────────────────
 const SHEET_CSV_BASE = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vR4BRRYZvxdkCWWld-wfZie60Qs6HaeskL0WqAD2eCd8yjuHIjcaSMgcCEstmHKMn2lIuF6Mlnzp5LR/pub?output=csv';
-const WRITE_URL      = 'https://script.google.com/macros/s/AKfycbx2Cox_EL7EXoTfFJtu8bVfU4i-mgzyVGsm8zt095p1pZOHWiLyMJo1aB7F1JyTQZcNXQ/exec';
+const WRITE_URL = 'https://script.google.com/macros/s/AKfycbx2Cox_EL7EXoTfFJtu8bVfU4i-mgzyVGsm8zt095p1pZOHWiLyMJo1aB7F1JyTQZcNXQ/exec';
+const API_URL   = '/api/proxy'; // Vercel proxy — avoids CORS
 
 // Entity list — from Entities tab
 const ENTITIES = [
@@ -351,67 +352,33 @@ function parseMappingCsv(csv){
 }
 
 // ── Load entity mappings from Google Sheet ────────────────────────────────────
-// ── Bridge iframe for cross-origin Apps Script calls ─────────────────────────
-let _bridge = null;
-let _bridgeReady = false;
-let _pendingBridge = [];
-let _bridgeCallbacks = {};
-
-function initBridge(){
-  return new Promise(resolve=>{
-    if(_bridgeReady){resolve();return;}
-    _bridge=document.createElement('iframe');
-    _bridge.src='bridge.html';
-    _bridge.style.cssText='display:none;width:0;height:0;border:none;position:absolute';
-    document.body.appendChild(_bridge);
-    window.addEventListener('message',function onMsg(e){
-      if(e.data.type==='BSI_READY'){
-        _bridgeReady=true;
-        window.removeEventListener('message',onMsg);
-        resolve();
-      }
-    });
-    setTimeout(()=>{if(!_bridgeReady){showDebug('Bridge timeout','error');resolve();}},5000);
-  });
-}
-
-function bridgeCall(params){
-  return new Promise(async resolve=>{
-    await initBridge();
-    const id='bsi_'+Date.now()+'_'+Math.random().toString(36).slice(2);
-    window.addEventListener('message',function handler(e){
-      if(e.data.type==='BSI_RESPONSE'&&e.data.id===id){
-        window.removeEventListener('message',handler);
-        resolve(e.data.data);
-      }
-    });
-    _bridge.contentWindow.postMessage({type:'BSI_REQUEST',id,params},window.location.origin);
-    setTimeout(()=>resolve({status:'error',msg:'timeout'}),10000);
-  });
-}
-
-// ── Load entity mappings via bridge ──────────────────────────────────────────
+// ── Load entity mappings ──────────────────────────────────────────────────────
 async function loadEntityMappings(entity){
   const tab=entityTabName(entity);
   showDebug('Reading tab: '+tab);
-  const data=await bridgeCall({action:'read',tab});
-  if(data.status==='ok'){
+  try{
+    const r=await fetch(API_URL+'?action=read&tab='+encodeURIComponent(tab));
+    const data=await r.json();
+    if(data.status==='ok'){
+      sheetMaps={}; sheetCF={};
+      (data.mappings||[]).forEach(m=>{
+        const k=norm(m.invoice_name);
+        sheetMaps[k]=m.inventory_name;
+        sheetCF[k]=parseFloat(m.conversion_factor)||1;
+      });
+      showDebug('Loaded '+Object.keys(sheetMaps).length+' mappings for '+entity);
+      setStat('ok','Connected · '+Object.keys(sheetMaps).length+' mappings for '+entity);
+    }else{
+      throw new Error(data.msg||'Unknown error');
+    }
+  }catch(e){
+    showDebug('Read failed: '+e.message,'error');
     sheetMaps={}; sheetCF={};
-    (data.mappings||[]).forEach(m=>{
-      const k=norm(m.invoice_name);
-      sheetMaps[k]=m.inventory_name;
-      sheetCF[k]=parseFloat(m.conversion_factor)||1;
-    });
-    showDebug('Loaded '+Object.keys(sheetMaps).length+' mappings for '+entity);
-    setStat('ok','Connected · '+Object.keys(sheetMaps).length+' mappings for '+entity);
-  }else{
-    showDebug('Read error: '+(data.msg||'unknown'),'error');
-    sheetMaps={}; sheetCF={};
-    setStat('err','Error: '+(data.msg||'unknown'));
+    setStat('err','Could not load: '+e.message);
   }
 }
 
-// ── Write mappings via bridge ─────────────────────────────────────────────────
+// ── Write mappings ────────────────────────────────────────────────────────────
 function showDebug(msg, type='info'){
   let panel=document.getElementById('debugPanel');
   if(!panel){
@@ -436,14 +403,19 @@ async function writeToSheet(entity, items){
   const tab=entityTabName(entity);
   const payload={tab, mappings:items.map(m=>({invoice_name:m.inv,inventory_name:m.tgt,conversion_factor:m.cf||1}))};
   showDebug('Writing '+items.length+' mapping(s) to '+tab);
-  const data=await bridgeCall({data:JSON.stringify(payload)});
-  if(data.status==='ok'){
-    showDebug('✓ Written '+data.written+' mapping(s)');
-    toast(items.length+' mapping(s) saved');
-    return true;
-  }else{
-    showDebug('Write error: '+(data.msg||'unknown'),'error');
-    toast('Write failed: '+(data.msg||'unknown'));
+  try{
+    const r=await fetch(API_URL+'?data='+encodeURIComponent(JSON.stringify(payload)));
+    const data=await r.json();
+    if(data.status==='ok'){
+      showDebug('✓ Written '+data.written+' mapping(s)');
+      toast(items.length+' mapping(s) saved');
+      return true;
+    }else{
+      throw new Error(data.msg||'Write failed');
+    }
+  }catch(e){
+    showDebug('Write failed: '+e.message,'error');
+    toast('Write failed: '+e.message);
     return false;
   }
 }
