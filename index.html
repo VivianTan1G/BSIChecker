@@ -1,0 +1,921 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Beer & Spirits Inventory Checker</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/fuse.js/7.0.0/fuse.min.js"></script>
+<style>
+:root{--bg:#F0F2F5;--surface:#FFF;--surface2:#F0F2F5;--border:#DDE1EA;--accent:#1E3A5F;--accent2:#2E6DAD;--accent-bg:#EBF3FB;--text:#0F1923;--dim:#637083;--faint:#B8C0CC;--pass:#1B6E3A;--pass-bg:#E8F5EE;--fail:#B72B2B;--fail-bg:#FDECEC;--warn:#8A6200;--warn-bg:#FEF6E4;}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:'Courier New',monospace;font-size:13px;min-height:100vh;display:flex;flex-direction:column}
+.hdr{background:var(--accent);color:#fff;padding:13px 22px;display:flex;align-items:center;gap:12px;flex-shrink:0}
+.hdr-title{font-family:Georgia,serif;font-size:18px;font-weight:300;letter-spacing:.04em}
+.hdr-sub{font-size:10px;letter-spacing:.14em;text-transform:uppercase;opacity:.55;margin-left:2px}
+.hdr-right{margin-left:auto;display:flex;align-items:center;gap:7px}
+.sdot{width:7px;height:7px;border-radius:50%;background:#FFC107;flex-shrink:0}
+.sdot.ok{background:#4CAF50}.sdot.err{background:#f44336}
+.slbl{font-size:10px;letter-spacing:.1em;text-transform:uppercase;opacity:.65}
+.ebar{background:var(--accent2);padding:8px 22px;display:flex;align-items:center;gap:10px;flex-shrink:0;flex-wrap:wrap}
+.ebar label{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:rgba(255,255,255,.7)}
+.esel{background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);color:#fff;padding:5px 10px;font-family:monospace;font-size:12px;outline:none;min-width:200px;cursor:pointer}
+.esel option{background:var(--accent);color:#fff}
+.ecnt{font-size:10px;color:rgba(255,255,255,.55)}
+.main{flex:1;max-width:1320px;width:100%;margin:0 auto;padding:16px 22px}
+.tabs{display:flex;border-bottom:2px solid var(--border);margin-bottom:18px}
+.tab{padding:8px 15px;background:none;border:none;font-family:monospace;font-size:11px;letter-spacing:.1em;text-transform:uppercase;cursor:pointer;color:var(--dim);border-bottom:2px solid transparent;margin-bottom:-2px;transition:all .15s;display:flex;align-items:center;gap:5px}
+.tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+.tab .td{width:6px;height:6px;border-radius:50%;background:var(--border);flex-shrink:0}
+.tab.done .td{background:var(--pass)}.tab.active .td{background:var(--accent)}
+.pane{display:none}.pane.active{display:block}
+.card{background:var(--surface);border:1px solid var(--border);padding:18px;margin-bottom:14px}
+.card-title{font-family:Georgia,serif;font-size:16px;font-weight:300;margin-bottom:3px}
+.card-sub{color:var(--dim);font-size:11px;letter-spacing:.06em;margin-bottom:14px}
+.upload{display:block;border:1px dashed var(--faint);padding:20px;text-align:center;cursor:pointer;background:var(--surface);transition:all .2s;margin-bottom:11px}
+.upload:hover,.upload.drag{border-color:var(--accent2);background:var(--accent-bg)}
+.upload-icon{font-size:20px;margin-bottom:5px}
+.upload p{color:var(--dim);font-size:11px}
+.upload .fn{color:var(--accent2);margin-top:3px;font-size:12px}
+input[type=file]{display:none}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:9px;margin-bottom:11px}
+.f{display:flex;flex-direction:column;gap:3px}
+.f label{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim)}
+.f select,.f input{background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:5px 7px;font-family:monospace;font-size:12px;outline:none}
+.f select:focus,.f input:focus{border-color:var(--accent2)}
+.hint{font-size:10px;color:var(--faint);margin-top:2px}
+.prev-wrap{border:1px solid var(--border);overflow:auto;max-height:160px;margin-bottom:11px}
+.prev-wrap table{width:100%;border-collapse:collapse;font-size:11px}
+.prev-wrap th{background:var(--surface2);padding:5px 7px;text-align:left;border-bottom:1px solid var(--border);color:var(--dim);position:sticky;top:0;white-space:nowrap}
+.prev-wrap td{padding:4px 7px;border-bottom:1px solid var(--border);white-space:nowrap}
+.prev-wrap tr:last-child td{border-bottom:none}
+.prev-wrap tr:hover td{background:var(--surface2)}
+.btn{padding:7px 13px;font-family:monospace;font-size:11px;letter-spacing:.1em;text-transform:uppercase;cursor:pointer;border:none;transition:all .15s}
+.btn-p{background:var(--accent);color:#fff}.btn-p:hover{background:#152d4a}
+.btn-s{background:transparent;color:var(--accent2);border:1px solid var(--accent2)}.btn-s:hover{background:var(--accent-bg)}
+.btn-sm{padding:3px 8px;font-size:10px}
+.btn-d{background:var(--fail-bg);color:var(--fail);border:1px solid var(--fail)}
+.btn-w{background:var(--warn-bg);color:var(--warn);border:1px solid var(--warn)}
+.btn-row{display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin-top:4px}
+.pill{display:inline-block;padding:2px 6px;font-size:10px;letter-spacing:.07em;text-transform:uppercase;border-radius:2px}
+.pass{background:var(--pass-bg);color:#3a9e64;border:1px solid var(--pass)}
+.fail{background:var(--fail-bg);color:#d45f5f;border:1px solid var(--fail)}
+.summary{display:flex;gap:14px;padding:11px 14px;background:var(--surface);border:1px solid var(--border);margin-bottom:14px;flex-wrap:wrap}
+.stat .n{font-family:Georgia,serif;font-size:20px;font-weight:300;color:var(--accent)}
+.stat .l{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim)}
+.sdiv{width:1px;background:var(--border)}
+.res-wrap{overflow:auto}
+.res-table{width:100%;border-collapse:collapse;font-size:12px}
+.res-table th{background:var(--surface2);padding:6px 8px;text-align:left;border-bottom:2px solid var(--border);color:var(--dim);font-size:10px;letter-spacing:.1em;text-transform:uppercase;position:sticky;top:0;white-space:nowrap}
+.res-table td{padding:5px 8px;border-bottom:1px solid var(--border);white-space:nowrap}
+.res-table tr.fr td{background:#FDF0F0}
+.res-table tr:hover td{background:var(--surface2)}
+.info{background:var(--accent-bg);border:1px solid #b3d4f0;padding:8px 12px;font-size:11px;color:var(--dim);line-height:1.7;margin-bottom:12px}
+.info strong{color:var(--accent)}
+.warn-box{background:var(--warn-bg);border:1px solid #e2c97a;padding:8px 12px;font-size:11px;color:var(--warn);line-height:1.6;margin-bottom:10px}
+.mm-table{width:100%;border-collapse:collapse;font-size:12px}
+.mm-table th{background:var(--surface2);padding:6px 8px;text-align:left;border-bottom:1px solid var(--border);color:var(--dim);font-size:10px;letter-spacing:.1em;text-transform:uppercase}
+.mm-table td{padding:5px 8px;border-bottom:1px solid var(--border);vertical-align:middle}
+.mm-table tr:hover td{background:var(--surface2)}
+.mm-table select{background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:3px 6px;font-family:monospace;font-size:11px;outline:none;width:100%;min-width:130px}
+.tag{font-size:10px;letter-spacing:.06em;font-weight:700}
+.tag-saved{color:var(--pass)}.tag-fuzzy{color:var(--accent2)}.tag-none{color:var(--faint)}
+.mm-actions{display:flex;gap:4px;align-items:center;flex-wrap:wrap}
+.conflict-item{border:1px solid #e2c97a;padding:10px 12px;margin-bottom:8px;background:var(--warn-bg)}
+.cv-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:5px}
+.cv{background:var(--surface);border:1px solid var(--border);padding:6px 9px;cursor:pointer;transition:all .15s}
+.cv:hover,.cv.sel{border-color:var(--accent2);background:var(--accent-bg)}
+.cv-lbl{font-size:10px;color:var(--dim);letter-spacing:.07em;text-transform:uppercase;margin-bottom:2px}
+.cv-val{font-size:12px}
+.overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:100;align-items:center;justify-content:center}
+.overlay.open{display:flex}
+.modal{background:var(--surface);border:1px solid var(--border);width:650px;max-width:96vw;max-height:88vh;display:flex;flex-direction:column}
+.modal-hdr{padding:12px 17px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center}
+.modal-hdr h3{font-family:Georgia,serif;font-weight:300;font-size:15px;color:var(--accent)}
+.modal-body{padding:14px 17px;overflow-y:auto;flex:1}
+.modal-ftr{padding:9px 17px;border-top:1px solid var(--border);display:flex;gap:7px;justify-content:flex-end;flex-wrap:wrap}
+.xbtn{background:none;border:none;color:var(--dim);font-size:16px;cursor:pointer}
+.match-item{margin-bottom:11px;padding-bottom:11px;border-bottom:1px solid var(--border)}
+.match-item:last-child{border-bottom:none;margin-bottom:0}
+.match-src{font-size:12px;color:var(--accent2);margin-bottom:4px;font-weight:600}
+.match-select{width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:5px 7px;font-family:monospace;font-size:12px;outline:none;margin-bottom:5px;display:none}
+.suggestions{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:7px}
+.sug-btn{background:var(--pass-bg);border:1px solid var(--pass);color:var(--pass);padding:4px 10px;font-family:monospace;font-size:11px;cursor:pointer;transition:all .15s;border-radius:2px}
+.sug-btn:hover{background:var(--pass);color:#fff}
+.sug-btn.selected{background:var(--pass);color:#fff}
+.sug-label{font-size:10px;color:var(--dim);letter-spacing:.08em;text-transform:uppercase;margin-bottom:3px}
+.search-box{position:relative;margin-bottom:5px}
+.search-input{width:100%;background:var(--surface);border:1px solid var(--border);color:var(--text);padding:6px 8px 6px 28px;font-family:monospace;font-size:12px;outline:none}
+.search-input:focus{border-color:var(--accent2)}
+.search-icon{position:absolute;left:8px;top:50%;transform:translateY(-50%);color:var(--faint);font-size:13px;pointer-events:none}
+.search-results{max-height:140px;overflow-y:auto;border:1px solid var(--border);border-top:none;background:var(--surface);display:none}
+.search-results.open{display:block}
+.search-result{padding:5px 9px;font-size:12px;cursor:pointer;transition:background .1s;display:flex;justify-content:space-between;align-items:center}
+.search-result:hover{background:var(--accent-bg)}
+.search-result.sel{background:var(--accent-bg);color:var(--accent)}
+.sr-score{font-size:10px;color:var(--faint)}
+.action-tab{padding:5px 11px;font-family:monospace;font-size:10px;letter-spacing:.08em;text-transform:uppercase;cursor:pointer;border:1px solid var(--border);background:var(--surface2);color:var(--dim);transition:all .15s;border-radius:2px}
+.action-tab.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+.action-tab:hover:not(.active){border-color:var(--accent2);color:var(--accent2)}
+.selected-inv{background:var(--accent-bg);border:1px solid var(--accent2);padding:5px 10px;font-size:12px;color:var(--accent);display:none;margin-bottom:5px;cursor:pointer;position:relative}
+.selected-inv .sel-x{position:absolute;right:8px;top:50%;transform:translateY(-50%);color:var(--dim);font-size:14px}
+
+.sec{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);margin-bottom:5px;margin-top:11px}
+.empty{text-align:center;padding:28px;color:var(--faint);font-size:12px}
+.toast{position:fixed;bottom:16px;right:16px;background:var(--text);color:#fff;padding:7px 13px;font-size:11px;z-index:200;opacity:0;transition:opacity .25s;pointer-events:none;max-width:300px}
+.toast.show{opacity:1}
+::-webkit-scrollbar{width:4px;height:4px}
+::-webkit-scrollbar-thumb{background:var(--faint)}
+</style>
+</head>
+<body>
+
+<div class="hdr">
+  <div>
+    <div class="hdr-title">Beer &amp; Spirits Inventory Checker</div>
+    <div class="hdr-sub">Multi-entity · Google Sheets sync</div>
+  </div>
+  <div class="hdr-right">
+    <div class="sdot" id="sdot"></div>
+    <span class="slbl" id="slbl">Connecting…</span>
+  </div>
+</div>
+
+<div class="ebar">
+  <label>Entity</label>
+  <select class="esel" id="entitySel" onchange="onEntityChange()">
+    <option value="">— select entity —</option>
+  </select>
+  <span class="ecnt" id="ecnt"></span>
+</div>
+
+<div class="main">
+  <div class="tabs">
+    <button class="tab active" id="tab0" onclick="goTab(0)"><span class="td"></span>Inventory</button>
+    <button class="tab" id="tab1" onclick="goTab(1)"><span class="td"></span>Purchases</button>
+    <button class="tab" id="tab2" onclick="goTab(2)"><span class="td"></span>Results</button>
+    <button class="tab" id="tab3" onclick="goTab(3)"><span class="td"></span>Mappings</button>
+  </div>
+
+  <!-- Inventory -->
+  <div class="pane active" id="pane0">
+    <div class="card">
+      <div class="card-title">Inventory Report</div>
+      <div class="card-sub">Upload this entity's monthly inventory Excel file</div>
+      <label class="upload" id="zone0" ondragover="drag(event,'zone0')" ondragleave="undrag('zone0')" ondrop="drop(event,0)">
+        <input type="file" id="file0" accept=".xlsx,.xls" onchange="loadFile(0)">
+        <div class="upload-icon">📋</div><p>Click to upload or drag &amp; drop</p>
+        <p class="fn" id="fn0">No file selected</p>
+      </label>
+      <div id="cfg0" style="display:none">
+        <div class="grid">
+          <div class="f"><label>Sheet</label><select id="sheet0" onchange="refreshPrev(0)"></select></div>
+          <div class="f"><label>Header Row</label><input type="number" id="skip0" value="0" min="0" onchange="refreshPrev(0)"><span class="hint">0 = first row is header</span></div>
+        </div>
+        <div class="sec">Column Mapping</div>
+        <div class="grid">
+          <div class="f"><label>Item Name</label><select id="c0_name"></select></div>
+          <div class="f"><label>Unit Cost</label><select id="c0_cost"></select></div>
+          <div class="f"><label>Purchase Qty</label><select id="c0_pqty"></select></div>
+        </div>
+        <div class="prev-wrap" id="prev0"></div>
+        <div class="btn-row"><button class="btn btn-p" onclick="confirmStep(0)">Confirm &amp; Continue →</button></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Purchases -->
+  <div class="pane" id="pane1">
+    <div class="card">
+      <div class="card-title">Purchase Data</div>
+      <div class="card-sub">Upload the purchase / delivery report</div>
+      <label class="upload" id="zone1" ondragover="drag(event,'zone1')" ondragleave="undrag('zone1')" ondrop="drop(event,1)">
+        <input type="file" id="file1" accept=".xlsx,.xls,.csv" onchange="loadFile(1)">
+        <div class="upload-icon">🧾</div><p>Click to upload or drag &amp; drop</p>
+        <p class="fn" id="fn1">No file selected</p>
+      </label>
+      <div id="cfg1" style="display:none">
+        <div class="grid">
+          <div class="f"><label>Sheet</label><select id="sheet1" onchange="refreshPrev(1)"></select></div>
+          <div class="f"><label>Header Row</label><input type="number" id="skip1" value="0" min="0" onchange="refreshPrev(1)"><span class="hint">0 = first row is header</span></div>
+        </div>
+        <div class="sec">Column Mapping</div>
+        <div class="grid">
+          <div class="f"><label>Item Name</label><select id="c1_name"></select></div>
+          <div class="f"><label>Unit Cost</label><select id="c1_cost"></select></div>
+          <div class="f"><label>Purchase Qty</label><select id="c1_qty"></select></div>
+        </div>
+        <div class="prev-wrap" id="prev1"></div>
+        <div class="btn-row"><button class="btn btn-p" onclick="runAnalysis()">Run Analysis →</button></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Results -->
+  <div class="pane" id="pane2">
+    <div style="margin-bottom:4px;font-family:Georgia,serif;font-size:16px;font-weight:300">Results</div>
+    <div style="color:var(--dim);font-size:11px;letter-spacing:.06em;margin-bottom:14px">Variance report — inventory vs purchase data</div>
+    <div id="results-body"><div class="empty">Run analysis to see results</div></div>
+  </div>
+
+  <!-- Mappings -->
+  <div class="pane" id="pane3">
+    <div style="margin-bottom:3px;font-family:Georgia,serif;font-size:16px;font-weight:300">Mapping Manager</div>
+    <div style="color:var(--dim);font-size:11px;letter-spacing:.06em;margin-bottom:12px">Invoice → Inventory for <span id="mmEnt" style="color:var(--accent);font-weight:600">—</span></div>
+    <div class="info">
+      <strong>Google Sheets sync:</strong> Mappings tagged <strong>SAVED</strong> are stored in your shared Google Sheet and available to the whole team.
+      New mappings are automatically saved to the sheet when confirmed.
+    </div>
+    <div id="mm-body"><div class="empty">Run analysis first to populate mappings.</div></div>
+  </div>
+</div>
+
+<!-- Match Modal -->
+<div class="overlay" id="matchModal">
+  <div class="modal">
+    <div class="modal-hdr"><h3>Manual Matching Required</h3><button class="xbtn" onclick="skipModal()">✕</button></div>
+    <div class="modal-body" id="matchBody"></div>
+    <div class="modal-ftr">
+      <button class="btn btn-s" onclick="skipModal()">Skip for Now</button>
+      <button class="btn btn-p" onclick="confirmMappings()">Confirm &amp; Run Analysis</button>
+    </div>
+  </div>
+</div>
+
+<!-- Conflict Modal -->
+<div class="overlay" id="conflictModal">
+  <div class="modal">
+    <div class="modal-hdr"><h3>Conflict Detected</h3><button class="xbtn" onclick="closeConflict()">✕</button></div>
+    <div class="modal-body">
+      <div class="warn-box">Someone else updated these mappings since you loaded the tool. Choose which version to keep.</div>
+      <div id="conflictBody"></div>
+    </div>
+    <div class="modal-ftr">
+      <button class="btn btn-s" onclick="closeConflict()">Cancel</button>
+      <button class="btn btn-p" onclick="resolveConflicts()">Save Resolved</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ── Config — hardcoded, no setup needed ───────────────────────────────────────
+const SHEET_CSV_BASE = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vR4BRRYZvxdkCWWld-wfZie60Qs6HaeskL0WqAD2eCd8yjuHIjcaSMgcCEstmHKMn2lIuF6Mlnzp5LR/pub?output=csv';
+const WRITE_URL      = 'https://script.google.com/macros/s/AKfycbx2Cox_EL7EXoTfFJtu8bVfU4i-mgzyVGsm8zt095p1pZOHWiLyMJo1aB7F1JyTQZcNXQ/exec';
+
+// Entity list — from Entities tab
+const ENTITIES = [
+  '1-Garden Pte Ltd',
+  '1-Garage Pte Ltd',
+  '1-Soleil Pte Ltd',
+  '1-Production Pte Ltd',
+  'HR Millennium Pte Ltd',
+  '1-Mansion Pte Ltd',
+  '1-Atico Pte Ltd',
+  '1-Spring Pte Ltd',
+  '1-Harvest Pte Ltd',
+  '1-Alfaro Pte Ltd'
+];
+
+// Entity → Google Sheet tab name
+// Rule: lowercase, remove all special characters and spaces, append _mappings
+// e.g. "1-Mansion Pte Ltd" → "1mansionpteltd_mappings"
+function entityTabName(entity) {
+  return norm(entity).replace(/\s+/g,'').replace(/[^a-z0-9]/g,'') + '_mappings';
+}
+
+// Preloaded mappings from 1mansion_mappings tab
+const PRELOADED = {
+  '1-Mansion Pte Ltd': {
+    'glenfiddich 12 years 700ml':           'Glenfiddich 12',
+    'hendricks gin 70cl agent':             "Hendrick's",
+    'eldoria elderflower liqeur 70cl':      'Eldoria Elderflower Liqueur',
+    'aperol aperitivo 11 70cl':             'Aperol',
+    'barsol pisco puro ouebranta 70cl':     'Barsol Pisco',
+    'campari bitter 25 75cl':               'Campari',
+    'chambord liqueur 165 50cl':            'Chambord',
+    'macallan 12yo so 40 70clnew':          'Macallan 12 Sherry Oak',
+    'martini rosso vermouth litre':         'Martini Rosso',
+    'suntory yamazaki 12yo sm wky 43 70cl': 'Yamazaki 12',
+    'absolut blue 12x07l':                  'Absolut Vodka',
+    'beefeater gin 12x07l':                 'Beefeater Gin',
+    'courvoisier vsop 21 40 12x07l':        'Courvoisier VSOP Cognac',
+    'havana club rum 3yo 12x07l':           'Havana Bianco',
+    'jim beam white 40 6x70cl gt noneu nrf':'Jim Beam Bourbon',
+    'john jameson irish whisky 12x07l':     'Jameson Irish',
+    'patron anejo 40 12x075l':              'Patron Anejo',
+    'patron reposado 40 12x075l':           'Patron Reposado',
+    'suntory roku gin sel ed 43 6x07l':     'Roku'
+  }
+};
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let currentEntity = '';
+let sheetMaps  = {};   // {norm(invoice): inventory_name}
+let sheetCF    = {};   // {norm(invoice): conversion_factor} — bottles per carton
+let sessIgnored = new Set();
+let includeInResults = new Set(); // unmatched purchase items to show as FAIL in results
+let intentUnmatched = new Set();
+const appSt = {wb:[null,null], data:[null,null]};
+let pendingUnmatched=[], pendingCb=null;
+let pendingConflicts=[], pendingSaveQ=[], conflictRes={};
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+const norm = s => String(s).toLowerCase().replace(/[^a-z0-9\s]/g,'').replace(/\s+/g,' ').trim();
+const parseN = v => { const n=parseFloat(String(v??'').replace(/[$,\s]/g,'')); return isNaN(n)?0:n; };
+function getMap(inv){ const k=norm(inv); return sheetMaps[k]||null; }
+function fuzzy(name,cands){ const f=new Fuse(cands,{includeScore:true,threshold:0.45,keys:['name']}); const r=f.search(name); return r.length?r[0].item.name:null; }
+function toast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),3500); }
+function goTab(n){ document.querySelectorAll('.pane').forEach((p,i)=>p.classList.toggle('active',i===n)); document.querySelectorAll('.tab').forEach((t,i)=>t.classList.toggle('active',i===n)); }
+function setStat(state,text){ const d=document.getElementById('sdot'),l=document.getElementById('slbl'); d.className='sdot'+( state==='ok'?' ok':state==='err'?' err':''); l.textContent=text; }
+
+// ── CSV helpers ───────────────────────────────────────────────────────────────
+function splitCsv(line){
+  const res=[]; let cur='',q=false;
+  for(let i=0;i<line.length;i++){const c=line[i];if(c==='"'){q=!q;}else if(c===','&&!q){res.push(cur.trim());cur='';}else cur+=c;}
+  res.push(cur.trim()); return res;
+}
+function parseMappingCsv(csv){
+  const lines=csv.trim().split('\n'); const maps={}, cfs={};
+  for(let i=1;i<lines.length;i++){
+    const c=splitCsv(lines[i]);
+    if(c[0]&&c[1]){
+      const k=norm(c[0]);
+      maps[k]=c[1].trim();
+      cfs[k]=parseFloat(c[2])||1; // conversion_factor, default 1
+    }
+  }
+  return {maps, cfs};
+}
+
+// ── Load entity mappings from Google Sheet ────────────────────────────────────
+async function loadEntityMappings(entity){
+  const tab=entityTabName(entity);
+  const url=SHEET_CSV_BASE+'&sheet='+encodeURIComponent(tab);
+  try{
+    const r=await fetch(url);
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const csv=await r.text();
+    const parsed=parseMappingCsv(csv);
+    // Merge preloaded seed with sheet data (sheet takes priority)
+    const preloaded=PRELOADED[entity]||{};
+    sheetMaps={...preloaded,...parsed.maps};
+    sheetCF={...parsed.cfs};
+    setStat('ok','Connected · '+Object.keys(sheetMaps).length+' mappings for '+entity);
+  }catch(e){
+    // Fall back to preloaded only
+    sheetMaps=PRELOADED[entity]||{};
+    sheetCF={};
+    setStat('ok','Sheet unavailable · using '+Object.keys(sheetMaps).length+' preloaded mappings');
+  }
+}
+
+// ── Write mappings to Google Sheet ───────────────────────────────────────────
+function showDebug(msg, type='info'){
+  let panel=document.getElementById('debugPanel');
+  if(!panel){
+    panel=document.createElement('div');
+    panel.id='debugPanel';
+    panel.style.cssText='position:fixed;bottom:60px;right:16px;width:420px;max-height:200px;overflow-y:auto;background:#1a1a2e;color:#00ff88;font-family:monospace;font-size:11px;padding:10px;z-index:300;border:1px solid #333;border-radius:2px';
+    const close=document.createElement('button');
+    close.textContent='✕';
+    close.style.cssText='position:absolute;top:4px;right:6px;background:none;border:none;color:#888;cursor:pointer;font-size:13px';
+    close.onclick=()=>panel.remove();
+    panel.appendChild(close);
+    document.body.appendChild(panel);
+  }
+  const line=document.createElement('div');
+  line.style.color=type==='error'?'#ff6b6b':type==='warn'?'#ffd93d':'#00ff88';
+  line.textContent='['+new Date().toLocaleTimeString()+'] '+msg;
+  panel.appendChild(line);
+  panel.scrollTop=panel.scrollHeight;
+}
+
+async function writeToSheet(entity, items){
+  const tab=entityTabName(entity);
+  const payload={tab, mappings:items.map(m=>({invoice_name:m.inv,inventory_name:m.tgt,conversion_factor:m.cf||1}))};
+  showDebug('Writing to tab: '+tab+' ('+items.length+' item(s))');
+  showDebug('Entity: '+entity);
+  showDebug('Payload: '+JSON.stringify(payload).substring(0,120)+'...');
+
+  // Method 1: GET with URL parameter (most reliable for Apps Script)
+  try{
+    const url=WRITE_URL+'?data='+encodeURIComponent(JSON.stringify(payload));
+    showDebug('Trying GET method...');
+    const r=await fetch(url,{method:'GET'});
+    const text=await r.text();
+    showDebug('Response: '+text.substring(0,100));
+    if(text.includes('"ok"')||text.includes('ok')){
+      showDebug('✓ Saved successfully via GET');
+      return true;
+    }
+    throw new Error('Response: '+text);
+  }catch(e1){
+    showDebug('GET failed: '+e1.message,'warn');
+    // Method 2: POST with no-cors
+    try{
+      showDebug('Trying POST no-cors...');
+      await fetch(WRITE_URL,{method:'POST',mode:'no-cors',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+      showDebug('POST sent (no-cors — cannot verify response)','warn');
+      return true;
+    }catch(e2){
+      showDebug('POST failed: '+e2.message,'error');
+      toast('Write failed — see debug panel');
+      return false;
+    }
+  }
+}
+
+// ── Save with conflict detection ──────────────────────────────────────────────
+async function saveMappings(toSave){
+  if(!currentEntity){toast('Select an entity first');return;}
+  // Re-fetch latest from sheet
+  await loadEntityMappings(currentEntity);
+  const conflicts=toSave.filter(m=>sheetMaps[m.inv]&&sheetMaps[m.inv]!==m.tgt).map(m=>({inv:m.inv,yours:m.tgt,theirs:sheetMaps[m.inv]}));
+  if(conflicts.length){showConflictModal(conflicts,toSave);return;}
+  toSave.forEach(m=>{ sheetMaps[m.inv]=m.tgt; sheetCF[m.inv]=m.cf||1; });
+  await writeToSheet(currentEntity,toSave);
+  toast(toSave.length+' mapping(s) saved to Google Sheet');
+}
+
+function showConflictModal(conflicts,allItems){
+  pendingConflicts=conflicts; pendingSaveQ=allItems; conflictRes={};
+  document.getElementById('conflictBody').innerHTML=conflicts.map((c,i)=>`
+    <div class="conflict-item">
+      <div style="font-size:11px;font-weight:600;margin-bottom:5px">"${c.inv}"</div>
+      <div class="cv-grid">
+        <div class="cv" id="cy_${i}" onclick="selC(${i},'y')"><div class="cv-lbl">Your version</div><div class="cv-val">${c.yours}</div></div>
+        <div class="cv" id="ct_${i}" onclick="selC(${i},'t')"><div class="cv-lbl">Sheet version</div><div class="cv-val">${c.theirs}</div></div>
+      </div></div>`).join('');
+  document.getElementById('conflictModal').classList.add('open');
+}
+function selC(i,ch){ conflictRes[i]=ch; document.getElementById('cy_'+i).classList.toggle('sel',ch==='y'); document.getElementById('ct_'+i).classList.toggle('sel',ch==='t'); }
+async function resolveConflicts(){
+  for(let i=0;i<pendingConflicts.length;i++){if(!conflictRes[i]){toast('Choose a version for each conflict');return;}}
+  const final=pendingSaveQ.map(m=>{const ci=pendingConflicts.findIndex(c=>c.inv===m.inv);return ci>=0&&conflictRes[ci]==='t'?{...m,tgt:pendingConflicts[ci].theirs}:m;});
+  closeConflict();
+  final.forEach(m=>{ sheetMaps[m.inv]=m.tgt; sheetCF[m.inv]=m.cf||1; });
+  await writeToSheet(currentEntity,final);
+  toast(final.length+' mapping(s) saved');
+}
+function closeConflict(){ document.getElementById('conflictModal').classList.remove('open'); }
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+function init(){
+  setStat('','Connecting…');
+  const sel=document.getElementById('entitySel');
+  sel.innerHTML='<option value="">— select entity —</option>'+ENTITIES.map(e=>`<option value="${e}">${e}</option>`).join('');
+  document.getElementById('ecnt').textContent=ENTITIES.length+' entities';
+  setStat('ok','Ready · select entity to load mappings');
+}
+
+async function onEntityChange(){
+  currentEntity=document.getElementById('entitySel').value;
+  sheetMaps={}; sheetCF={};
+  document.getElementById('mmEnt').textContent=currentEntity||'—';
+  if(currentEntity){
+    setStat('','Loading mappings…');
+    await loadEntityMappings(currentEntity);
+  }
+}
+
+// ── File loading ──────────────────────────────────────────────────────────────
+function drag(e,id){e.preventDefault();document.getElementById(id).classList.add('drag');}
+function undrag(id){document.getElementById(id).classList.remove('drag');}
+function drop(e,step){e.preventDefault();undrag('zone'+step);const f=e.dataTransfer.files[0];if(f)processFile(step,f);}
+function loadFile(step){const f=document.getElementById('file'+step).files[0];if(f)processFile(step,f);}
+function processFile(step,file){
+  document.getElementById('fn'+step).textContent=file.name;
+  const r=new FileReader();
+  r.onload=e=>{
+    const wb=XLSX.read(new Uint8Array(e.target.result),{type:'array'});
+    appSt.wb[step]=wb;
+    document.getElementById('sheet'+step).innerHTML=wb.SheetNames.map(s=>`<option value="${s}">${s}</option>`).join('');
+    document.getElementById('cfg'+step).style.display='block';
+    refreshPrev(step);
+  };
+  r.readAsArrayBuffer(file);
+}
+function getRows(step){
+  const wb=appSt.wb[step]; if(!wb)return null;
+  const ws=wb.Sheets[document.getElementById('sheet'+step).value];
+  const skip=parseInt(document.getElementById('skip'+step).value)||0;
+  const raw=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
+  if(raw.length<=skip)return null;
+  return{headers:raw[skip].map(h=>String(h).trim()), rows:raw.slice(skip+1).filter(r=>r.some(c=>c!==''))};
+}
+function refreshPrev(step){
+  const res=getRows(step); if(!res)return;
+  const{headers,rows}=res;
+  const ids=step===0?['c0_name','c0_cost','c0_pqty']:['c1_name','c1_cost','c1_qty'];
+  const opts=headers.map((h,i)=>`<option value="${i}">${h||'col '+(i+1)}</option>`).join('');
+  ids.forEach(id=>document.getElementById(id).innerHTML=opts);
+  document.getElementById('prev'+step).innerHTML=`<table><tr>${headers.map(h=>`<th>${h||'—'}</th>`).join('')}</tr>${rows.slice(0,7).map(r=>`<tr>${headers.map((_,i)=>`<td>${r[i]??''}</td>`).join('')}</tr>`).join('')}</table>`;
+}
+function confirmStep(step){
+  if(!currentEntity){alert('Select your entity first.');return;}
+  const res=getRows(step); if(!res){alert('Upload a file first.');return;}
+  appSt.data[step]=res;
+  document.getElementById('tab'+step).classList.add('done');
+  goTab(step+1);
+}
+
+// ── Parse ─────────────────────────────────────────────────────────────────────
+function parseInv(){
+  const{rows}=appSt.data[0];
+  const nc=+document.getElementById('c0_name').value, cc=+document.getElementById('c0_cost').value, pc=+document.getElementById('c0_pqty').value;
+  const r={};
+  for(const row of rows){const n=norm(row[nc]);if(!n)continue;r[n]={displayName:String(row[nc]).trim(),unitCost:parseN(row[cc]),openQty:null,closeQty:null,purchQty:parseN(row[pc])};}
+  return r;
+}
+function parsePurch(){
+  const{rows}=appSt.data[1];
+  const nc=+document.getElementById('c1_name').value, cc=+document.getElementById('c1_cost').value, qc=+document.getElementById('c1_qty').value;
+  const r={};
+  for(const row of rows){const n=norm(row[nc]);if(!n)continue;r[n]=r[n]||[];r[n].push({unitCost:parseN(row[cc]),qty:parseN(row[qc]),displayName:String(row[nc]).trim()});}
+  return r;
+}
+
+// ── Run Analysis ──────────────────────────────────────────────────────────────
+async function runAnalysis(){
+  if(!currentEntity){alert('Select your entity first.');return;}
+  const res=getRows(1); if(!res){alert('Upload a purchase file first.');return;}
+  appSt.data[1]=res;
+  document.getElementById('tab1').classList.add('done');
+  await loadEntityMappings(currentEntity);
+
+  const inv=parseInv(), purch=parsePurch();
+  const invNames=Object.keys(inv), invCands=invNames.map(n=>({name:n}));
+  const matched={}, unmatched=[], matchedKeys=new Set();
+
+  for(const[rn,rows] of Object.entries(purch)){
+    if(sessIgnored.has(norm(rn)))continue;
+    const cf=sheetCF[norm(rn)]||1;
+    // cf > 1 means invoice is in cartons: multiply qty, divide unit cost
+    const converted=cf>1?rows.map(r=>({...r,qty:r.qty*cf,unitCost:r.unitCost/cf})):rows;
+    const mp=getMap(rn);
+    if(mp&&inv[norm(mp)]){matched[norm(mp)]=(matched[norm(mp)]||[]);matched[norm(mp)].push(...converted);matchedKeys.add(norm(rn));}
+    else{
+      const fz=fuzzy(norm(rn),invCands);
+      if(fz){matched[fz]=(matched[fz]||[]);matched[fz].push(...converted);matchedKeys.add(norm(rn));}
+      else unmatched.push({rawName:rn,rows});
+    }
+  }
+  if(unmatched.length) await showMatchModal(unmatched,invNames,inv,matched,purch,matchedKeys);
+  else buildResults(inv,purch,matched,matchedKeys);
+}
+
+// ── Match Modal (improved with suggestions + search) ──────────────────────────
+let _matchInv = {};  // store inventory for search
+let _matchInvNames = [];
+
+function getTopSuggestions(invoiceName, invCands, count=5){
+  const f=new Fuse(invCands,{includeScore:true,threshold:0.7,keys:['name']});
+  const r=f.search(norm(invoiceName));
+  return r.slice(0,count).map(m=>({name:m.item.name,score:m.score}));
+}
+
+function showMatchModal(unmatched,invNames,inv,matched,purch,matchedKeys){
+  _matchInv=inv; _matchInvNames=invNames;
+  return new Promise(resolve=>{
+    pendingUnmatched=unmatched;
+    pendingCb=()=>{
+      for(const u of unmatched){
+        const k=norm(u.rawName); if(sessIgnored.has(k))continue;
+        const mp=getMap(u.rawName);
+        if(mp&&inv[norm(mp)]){
+          const cf=sheetCF[k]||1;
+          const converted=cf>1?u.rows.map(r=>({...r,qty:r.qty*cf,unitCost:r.unitCost/cf})):u.rows;
+          matched[norm(mp)]=(matched[norm(mp)]||[]);matched[norm(mp)].push(...converted);matchedKeys.add(k);
+        }
+      }
+      buildResults(inv,purch,matched,matchedKeys); resolve();
+    };
+    const invCands=invNames.map(n=>({name:n}));
+    document.getElementById('matchBody').innerHTML=unmatched.map((u,i)=>{
+      const suggestions=getTopSuggestions(u.rawName,invCands);
+      const sugHTML=suggestions.length
+        ?`<div class="sug-label">Suggested matches</div>
+          <div class="suggestions">${suggestions.map(s=>
+            `<button class="sug-btn" onclick="pickSuggestion(${i},'${s.name}')" data-val="${s.name}">${_matchInv[s.name]?.displayName||s.name}</button>`
+          ).join('')}</div>`
+        :`<div class="sug-label" style="color:var(--faint)">No close matches found</div>`;
+      return`<div class="match-item" id="mi${i}">
+        <div class="match-src">${u.rawName}</div>
+        <div style="display:flex;gap:6px;margin-bottom:10px;margin-top:2px">
+          <button class="action-tab active" id="at_match_${i}" onclick="setAction(${i},'match')">Match to inventory</button>
+          <button class="action-tab" id="at_include_${i}" onclick="setAction(${i},'include')">Include in results (no inventory match)</button>
+          <button class="action-tab" id="at_ignore_${i}" onclick="setAction(${i},'ignore')">Ignore</button>
+        </div>
+        <input type="hidden" id="action${i}" value="match">
+        <div id="matchSection${i}">
+          ${sugHTML}
+          <div class="sug-label" style="margin-top:6px">Or search all inventory items</div>
+          <div class="search-box">
+            <span class="search-icon">🔍</span>
+            <input class="search-input" id="si${i}" type="text" placeholder="Type to search…" oninput="onSearch(${i})" onfocus="onSearch(${i})">
+          </div>
+          <div class="search-results" id="sr${i}"></div>
+          <div class="selected-inv" id="sel${i}" onclick="clearSelection(${i})">
+            <span id="seltext${i}"></span>
+            <span class="sel-x">✕</span>
+          </div>
+          <input type="hidden" id="ms${i}" value="">
+          <div style="display:flex;gap:10px;align-items:center;margin-top:6px;margin-bottom:2px">
+            <label style="font-size:11px;color:var(--dim);display:flex;align-items:center;gap:5px;white-space:nowrap">
+              Bottles per carton: <input type="number" id="cf${i}" value="1" min="1" step="1" style="width:55px;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:3px 5px;font-family:monospace;font-size:12px;outline:none;text-align:center">
+            </label>
+            <span style="font-size:10px;color:var(--faint)">Set to 1 for spirits, 24 for beer cartons.</span>
+          </div>
+          <div style="font-size:11px;color:var(--dim);margin-top:2px">Saves to Google Sheet for ${currentEntity}</div>
+        </div>
+        <div id="includeSection${i}" style="display:none;font-size:11px;color:var(--warn);padding:7px 0">
+          This item will appear in the results as a <strong>FAIL</strong> row — purchase exists but not found in inventory report.
+        </div>
+        <div id="ignoreSection${i}" style="display:none;font-size:11px;color:var(--faint);padding:7px 0">
+          This item will be excluded from results entirely (e.g. wine, non-spirits).
+        </div>
+      </div>`}).join('');
+    document.getElementById('matchModal').classList.add('open');
+    // Close search results when clicking outside
+    document.addEventListener('click',closeAllSearchResults);
+  });
+}
+
+function pickSuggestion(i,normName){
+  const display=_matchInv[normName]?.displayName||normName;
+  document.getElementById('ms'+i).value=normName;
+  document.getElementById('seltext'+i).textContent=display;
+  document.getElementById('sel'+i).style.display='block';
+  document.getElementById('si'+i).value='';
+  document.getElementById('sr'+i).classList.remove('open');
+  // Highlight the picked button
+  const btns=document.getElementById('mi'+i).querySelectorAll('.sug-btn');
+  btns.forEach(b=>b.classList.toggle('selected',b.dataset.val===normName));
+  if(document.getElementById('ib'+i).dataset.ign==='1') toggleIgnore(i);
+}
+
+function onSearch(i){
+  const q=document.getElementById('si'+i).value.trim();
+  const sr=document.getElementById('sr'+i);
+  if(!q){sr.classList.remove('open');return;}
+  const qn=norm(q);
+  // Simple filter: show items containing the search text
+  const results=_matchInvNames.filter(n=>{
+    const dn=_matchInv[n]?.displayName||'';
+    return norm(dn).includes(qn)||n.includes(qn);
+  }).slice(0,15);
+  if(!results.length){sr.innerHTML='<div style="padding:8px;font-size:11px;color:var(--faint)">No matches</div>';sr.classList.add('open');return;}
+  sr.innerHTML=results.map(n=>{
+    const dn=_matchInv[n]?.displayName||n;
+    return`<div class="search-result" onclick="pickSearchResult(${i},'${n}')">${dn}</div>`;
+  }).join('');
+  sr.classList.add('open');
+}
+
+function pickSearchResult(i,normName){
+  pickSuggestion(i,normName); // reuse same logic
+}
+
+function clearSelection(i){
+  document.getElementById('ms'+i).value='';
+  document.getElementById('sel'+i).style.display='none';
+  const btns=document.getElementById('mi'+i).querySelectorAll('.sug-btn');
+  btns.forEach(b=>b.classList.remove('selected'));
+}
+
+function closeAllSearchResults(e){
+  if(!e.target.classList.contains('search-input')){
+    document.querySelectorAll('.search-results').forEach(el=>el.classList.remove('open'));
+  }
+}
+
+function setAction(i, action){
+  document.getElementById('action'+i).value=action;
+  ['match','include','ignore'].forEach(a=>{
+    document.getElementById('at_'+a+'_'+i).classList.toggle('active',a===action);
+  });
+  document.getElementById('matchSection'+i).style.display=action==='match'?'':'none';
+  document.getElementById('includeSection'+i).style.display=action==='include'?'':'none';
+  document.getElementById('ignoreSection'+i).style.display=action==='ignore'?'':'none';
+  if(action!=='match') clearSelection(i);
+}
+function onSel(i){} // no-op, kept for compatibility
+function skipModal(){ document.getElementById('matchModal').classList.remove('open'); document.removeEventListener('click',closeAllSearchResults); if(pendingCb)pendingCb(); }
+
+async function confirmMappings(){
+  const toSave=[];
+  includeInResults.clear();
+  for(let i=0;i<pendingUnmatched.length;i++){
+    const action=document.getElementById('action'+i).value;
+    const k=norm(pendingUnmatched[i].rawName);
+    if(action==='ignore'){sessIgnored.add(k);continue;}
+    if(action==='include'){includeInResults.add(k);continue;}
+    // action === 'match'
+    const sel=document.getElementById('ms'+i); if(!sel.value)continue;
+    const cf=parseInt(document.getElementById('cf'+i).value)||1;
+    sheetCF[k]=cf;
+    toSave.push({inv:k, tgt:sel.value, cf:cf});
+  }
+  document.getElementById('matchModal').classList.remove('open');
+  document.removeEventListener('click',closeAllSearchResults);
+  if(toSave.length) await saveMappings(toSave);
+  if(pendingCb) pendingCb();
+}
+
+// ── Build Results ─────────────────────────────────────────────────────────────
+function pill(pass,na){if(na)return'';return pass?'<span class="pill pass">PASS</span>':'<span class="pill fail">FAIL</span>';}
+function vc(v){if(v===''||v==null)return'';const n=parseFloat(v);if(isNaN(n)||n===0)return v;return(n>0?'+':'')+v;}
+
+function buildResults(inv,purch,matched,matchedKeys){
+  window._inv=inv; window._purch=purch; window._matched=matched; window._mkeys=matchedKeys;
+  let total=0,fCost=0,fQty=0,fBal=0,fUnmatched=0; const rows=[];
+  for(const[nk,d] of Object.entries(inv)){
+    total++;
+    const pr=matched[nk]||[], has=pr.length>0;
+    const cm={}; for(const p of pr){const k=p.unitCost.toFixed(4);if(!cm[k])cm[k]={cost:p.unitCost,qty:0};cm[k].qty+=p.qty;}
+    const pl=Object.values(cm), pqSum=pl.reduce((a,l)=>a+l.qty,0);
+    const costMis=has&&pl.some(l=>Math.abs(l.cost-d.unitCost)>0.005);
+    const qtyMis=has&&Math.abs(pqSum-d.purchQty)>0.001;
+    const iC=d.openQty+d.purchQty-d.closeQty, pC=has?d.openQty+pqSum-d.closeQty:null;
+    const balMis=pC!==null&&Math.abs(pC-iC)>0.001;
+    if(costMis)fCost++; if(qtyMis)fQty++; if(balMis)fBal++; if(!has)fUnmatched++;
+    rows.push({dn:d.displayName,nk,ic:d.unitCost,oq:d.openQty,cq:d.closeQty,ipq:d.purchQty,pl,pqSum,costMis,qtyMis,balMis,has,iC,pC,purchOnly:false});
+  }
+  // Add purchase-only rows for items user chose to include in results
+  for(const[rn,pr] of Object.entries(purch)){
+    if(sessIgnored.has(rn)||matchedKeys.has(rn))continue;
+    if(!includeInResults.has(rn))continue; // only include if user explicitly chose to
+    const cf=sheetCF[rn]||1;
+    const converted=cf>1?pr.map(r=>({...r,qty:r.qty*cf,unitCost:r.unitCost/cf})):pr;
+    const cm={}; for(const p of converted){const k=p.unitCost.toFixed(4);if(!cm[k])cm[k]={cost:p.unitCost,qty:0};cm[k].qty+=p.qty;}
+    const pl=Object.values(cm); total++; fUnmatched++;
+    rows.push({dn:pr[0].displayName,nk:rn,ic:null,oq:null,cq:null,ipq:null,pl,pqSum:pl.reduce((a,l)=>a+l.qty,0),costMis:false,qtyMis:false,balMis:false,has:true,iC:null,pC:null,purchOnly:true});
+  }
+  const anyFail=r=>!intentUnmatched.has(r.nk)&&(r.purchOnly||r.costMis||r.qtyMis||r.balMis);
+  let tHTML='';
+  rows.forEach(r=>{
+    const fail=anyFail(r);
+    const lines=r.has?r.pl:[null];
+    lines.forEach((line,li)=>{
+      const f=li===0, sp=lines.length;
+      const cf=line&&r.ic!==null?Math.abs(line.cost-r.ic)>0.005:false;
+      const cv=line&&r.ic!==null?(line.cost-r.ic).toFixed(2):'';
+      const qv=r.has&&r.ipq!==null?(r.pqSum-r.ipq).toFixed(2):'';
+      const bv=r.pC!==null&&r.iC!==null?(r.pC-r.iC).toFixed(2):'';
+      tHTML+=`<tr class="${fail?'fr':''}" data-fail="${fail?1:0}">`;
+      if(f){tHTML+=`<td rowspan="${sp}">${r.dn}${r.purchOnly?' <span style="font-size:10px;color:var(--fail);font-weight:700">NOT IN INVENTORY</span>':''}</td><td rowspan="${sp}">${r.ic!==null?r.ic.toFixed(2):''}</td>`;}
+      tHTML+=`<td>${line?line.cost.toFixed(2):''}</td><td>${cv?vc(cv):''}</td><td>${r.purchOnly?'<span class="pill fail">FAIL</span>':pill(!cf,!r.has||r.ic===null)}</td>`;
+      if(f){
+        tHTML+=`<td rowspan="${sp}">${r.oq!==null?r.oq.toFixed(2):''}</td>`;
+        tHTML+=`<td rowspan="${sp}">${r.ipq!==null?r.ipq.toFixed(2):''}</td>`;
+        tHTML+=`<td rowspan="${sp}">${r.has?r.pqSum.toFixed(2):''}</td>`;
+        tHTML+=`<td rowspan="${sp}">${qv?vc(qv):''}</td>`;
+        tHTML+=`<td rowspan="${sp}">${pill(!r.qtyMis,!r.has||r.ipq===null)}</td>`;
+        tHTML+=`<td rowspan="${sp}">${r.cq!==null?r.cq.toFixed(2):''}</td>`;
+        tHTML+=`<td rowspan="${sp}">${r.iC!==null?r.iC.toFixed(2):''}</td>`;
+        tHTML+=`<td rowspan="${sp}">${r.pC!==null?r.pC.toFixed(2):''}</td>`;
+        tHTML+=`<td rowspan="${sp}">${bv?vc(bv):''}</td>`;
+        tHTML+=`<td rowspan="${sp}">${pill(!r.balMis,!r.has)}</td>`;
+      }
+      tHTML+=`</tr>`;
+    });
+  });
+  document.getElementById('results-body').innerHTML=`
+    <div style="font-size:11px;color:var(--dim);margin-bottom:9px">Entity: <strong style="color:var(--accent)">${currentEntity}</strong></div>
+    <div class="summary">
+      <div class="stat"><div class="n">${total}</div><div class="l">Items</div></div><div class="sdiv"></div>
+      <div class="stat"><div class="n" style="color:${fCost>0?'var(--fail)':'var(--pass)'}">${fCost}</div><div class="l">Cost Mismatch</div></div><div class="sdiv"></div>
+      <div class="stat"><div class="n" style="color:${fQty>0?'var(--fail)':'var(--pass)'}">${fQty}</div><div class="l">Qty Mismatch</div></div><div class="sdiv"></div>
+      <div class="stat"><div class="n" style="color:${fBal>0?'var(--fail)':'var(--pass)'}">${fBal}</div><div class="l">Balance Mismatch</div></div><div class="sdiv"></div>
+      <div class="stat"><div class="n" style="color:${fUnmatched>0?'var(--warn)':'var(--pass)'}">${fUnmatched}</div><div class="l">Unmatched</div></div>
+    </div>
+    <div class="btn-row" style="margin-bottom:11px">
+      <button class="btn btn-p" onclick="exportExcel()">↓ Export Excel</button>
+      <button class="btn btn-s" id="failBtn" onclick="toggleFail()">Fail Only</button>
+      <button class="btn btn-s" onclick="goTab(3)" style="margin-left:auto">⇄ Mappings</button>
+    </div>
+    <div class="res-wrap"><table class="res-table">
+      <thead>
+        <tr>
+          <th rowspan="2">Item</th>
+          <th colspan="3" style="text-align:center;border-bottom:1px solid var(--border)">Unit Cost</th>
+          <th colspan="2" style="text-align:center;border-bottom:1px solid var(--border)">Qty</th>
+          <th colspan="4" style="text-align:center;border-bottom:1px solid var(--border)">Purchase Qty</th>
+          <th colspan="4" style="text-align:center;border-bottom:1px solid var(--border)">Balance (Open+Purch−Close)</th>
+        </tr>
+        <tr>
+          <th>Inv Cost</th><th>Purch Cost</th><th>Check</th>
+          <th>Opening</th><th>Closing</th>
+          <th>Inv Qty</th><th>Purch Qty</th><th>Variance</th><th>Check</th>
+          <th>Inv COGS</th><th>Purch COGS</th><th>Variance</th><th>Check</th>
+        </tr>
+      </thead>
+      <tbody id="resBody">${tHTML}</tbody>
+    </table></div>`;
+  window._rows=rows;
+  goTab(2);
+  document.getElementById('tab2').classList.add('done');
+  populateMM(inv,purch,matched);
+}
+
+let failOnly=false;
+function toggleFail(){
+  failOnly=!failOnly;
+  document.getElementById('failBtn').textContent=failOnly?'Show All':'Fail Only';
+  Array.from(document.querySelectorAll('#resBody tr')).forEach(tr=>{tr.style.display=failOnly&&tr.getAttribute('data-fail')!=='1'?'none':'';});
+}
+
+// ── Mapping Manager ───────────────────────────────────────────────────────────
+function populateMM(inv,purch,matched){
+  window._mmInv=inv; window._mmPurch=purch;
+  const invNames=Object.keys(inv), invCands=invNames.map(n=>({name:n}));
+  const invOpts=invNames.map(n=>`<option value="${n}">${inv[n].displayName}</option>`).join('');
+  const purchRev={};
+  for(const ik of Object.keys(matched)){
+    for(const rk of Object.keys(purch)){
+      const nk=norm(rk), mp=getMap(nk);
+      if(mp&&norm(mp)===ik){purchRev[nk]=ik;continue;}
+      if(!mp&&!purchRev[nk]){const fz=fuzzy(nk,invCands);if(fz===ik)purchRev[nk]=ik;}
+    }
+  }
+  function badge(nk){
+    if(sheetMaps[nk])return`<span class="tag tag-saved">SAVED</span>`;
+    if(purchRev[nk])return`<span class="tag tag-fuzzy">FUZZY</span>`;
+    return`<span class="tag tag-none">UNMATCHED</span>`;
+  }
+  let html='<div style="overflow:auto"><table class="mm-table"><thead><tr><th>Invoice Name</th><th>Inventory Item</th><th>Bottles/Ctn</th><th>Status</th><th>Actions</th></tr></thead><tbody>';
+  for(const[rk,val] of Object.entries(purch)){
+    const nk=norm(rk); if(sessIgnored.has(nk))continue;
+    const dn=val[0].displayName, isInt=intentUnmatched.has(nk);
+    const cfVal=sheetCF[nk]||1;
+    const actions=isInt
+      ?`<button class="btn btn-sm btn-s" onclick="mmClear(this)" data-src="${nk}">Clear</button>`
+      :`<button class="btn btn-sm btn-p" onclick="mmSave(this)">Save to Sheet</button>
+        ${!getMap(nk)&&!purchRev[nk]?`<button class="btn btn-sm btn-w" onclick="mmIgnore(this)" data-src="${nk}">Ignore</button>`:''}`;
+    html+=`<tr>
+      <td>${dn}</td>
+      <td><select class="mm-sel" data-src="${nk}" onchange="mmChange(this)"${isInt?' disabled style="opacity:.35"':''}><option value="">— unmatched —</option>${invOpts}</select></td>
+      <td><input type="number" class="mm-cf" data-src="${nk}" value="${cfVal}" min="1" step="1" style="width:50px;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:2px 4px;font-family:monospace;font-size:11px;text-align:center;outline:none" onchange="mmChange(this)"></td>
+      <td>${badge(nk)}</td>
+      <td class="mm-actions">${actions}</td>
+    </tr>`;
+  }
+  html+='</tbody></table></div>';
+  document.getElementById('mm-body').innerHTML=html;
+  document.querySelectorAll('.mm-sel').forEach(sel=>{
+    const nk=sel.dataset.src, tgt=sheetMaps[nk]||purchRev[nk]||'';
+    if(tgt) sel.value=tgt;
+  });
+}
+
+function mmChange(sel){const td=sel.closest('tr').querySelector('.mm-actions');if(td&&!td.querySelector('.ud')){const n=document.createElement('span');n.className='ud';n.style.cssText='color:var(--accent2);font-size:10px';n.textContent=' ●';td.prepend(n);}}
+function mmIgnore(btn){intentUnmatched.add(btn.dataset.src);if(window._mmInv)populateMM(window._mmInv,window._mmPurch,window._matched);}
+function mmClear(btn){intentUnmatched.delete(btn.dataset.src);if(window._mmInv)populateMM(window._mmInv,window._mmPurch,window._matched);}
+async function mmSave(btn){
+  const row=btn.closest('tr'),sel=row.querySelector('.mm-sel'),cfInput=row.querySelector('.mm-cf');
+  if(!sel.value){toast('Select an inventory item first');return;}
+  const cf=parseInt(cfInput?.value)||1;
+  await saveMappings([{inv:sel.dataset.src, tgt:sel.value, cf:cf}]);
+  updTag(row,'SAVED','tag-saved');clearUD(row);
+}
+function updTag(row,lbl,cls){const td=row.querySelectorAll('td')[3];if(td)td.innerHTML=`<span class="tag ${cls}">${lbl}</span>`;}
+function clearUD(row){const n=row.querySelector('.ud');if(n)n.remove();}
+
+// ── Export ────────────────────────────────────────────────────────────────────
+function exportExcel(){
+  const rows=window._rows; if(!rows)return;
+  const wb=XLSX.utils.book_new();
+  const data=[['Entity: '+currentEntity],['Item','Inv Unit Cost','Purch Unit Cost','Cost Variance','Cost Check','Inv Purch Qty','Purch Total Qty','Qty Variance','Qty Check']];
+  rows.forEach(r=>{
+    if(r.purchOnly)return;
+    (r.has?r.pl:[null]).forEach((line,li)=>{
+      const f=li===0;
+      const cf=line&&r.ic!==null?Math.abs(line.cost-r.ic)>0.005:false;
+      const cv=line&&r.ic!==null?+(line.cost-r.ic).toFixed(2):'';
+      const qv=r.has&&r.ipq!==null?+(r.pqSum-r.ipq).toFixed(2):'';
+      data.push([
+        f?r.dn:'',
+        f&&r.ic!==null?r.ic:'',
+        line?line.cost:'',
+        cv,
+        !r.has?'':(cf?'FAIL':'PASS'),
+        f&&r.ipq!==null?r.ipq:'',
+        f&&r.has?r.pqSum:'',
+        f?qv:'',
+        f?(!r.has||r.ipq===null?'':(r.qtyMis?'FAIL':'PASS')):''
+      ]);
+    });
+  });
+  const ws=XLSX.utils.aoa_to_sheet(data);
+  ws['!cols']=[{wch:30},{wch:14},{wch:14},{wch:14},{wch:12},{wch:14},{wch:14},{wch:14},{wch:12}];
+  XLSX.utils.book_append_sheet(wb,ws,'Results');
+  XLSX.writeFile(wb,'BSI_'+currentEntity+'_'+new Date().toISOString().slice(0,10)+'.xlsx');
+}
+
+// ── Start ─────────────────────────────────────────────────────────────────────
+init();
+</script>
+</body>
+</html>
