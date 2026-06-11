@@ -759,19 +759,23 @@ function buildResults(inv,purch,matched,matchedKeys){
     const fail=anyFail(r);
     const lines=r.has?r.pl:[null];
     lines.forEach((line,li)=>{
-      const f=li===0, sp=lines.length;
-      const cf=line&&r.ic!==null?Math.abs(line.cost-r.ic)>0.005:false;
+      const f=li===0;
+      const costFail=line&&r.ic!==null?Math.abs(line.cost-r.ic)>0.005:false;
       const cv=line&&r.ic!==null?(line.cost-r.ic).toFixed(2):'';
       const qv=r.has&&r.ipq!==null?(r.pqSum-r.ipq).toFixed(2):'';
       tHTML+=`<tr class="${fail?'fr':''}" data-fail="${fail?1:0}">`;
-      if(f){tHTML+=`<td rowspan="${sp}">${r.dn}${r.purchOnly?' <span style="font-size:10px;color:var(--fail);font-weight:700">NOT IN INVENTORY</span>':''}</td><td rowspan="${sp}">${r.ic!==null?r.ic.toFixed(2):''}</td>`;}
-      tHTML+=`<td>${line?line.cost.toFixed(2):''}</td><td>${cv?vc(cv):''}</td><td>${r.purchOnly?'<span class="pill fail">FAIL</span>':pill(!cf,!r.has||r.ic===null)}</td>`;
-      if(f){
-        tHTML+=`<td rowspan="${sp}">${r.ipq!==null?r.ipq.toFixed(2):''}</td>`;
-        tHTML+=`<td rowspan="${sp}">${r.has?r.pqSum.toFixed(2):''}</td>`;
-        tHTML+=`<td rowspan="${sp}">${qv?vc(qv):''}</td>`;
-        tHTML+=`<td rowspan="${sp}">${r.purchOnly?'<span class="pill fail">FAIL</span>':pill(!r.qtyMis,!r.has||r.ipq===null)}</td>`;
-      }
+      // Item name — only on first sub-row, blank for subsequent
+      tHTML+=`<td>${f?(r.dn+(r.purchOnly?' <span style="font-size:10px;color:var(--fail);font-weight:700">NOT IN INVENTORY</span>':'')):''}</td>`;
+      // Unit cost columns
+      tHTML+=`<td style="text-align:right">${f&&r.ic!==null?r.ic.toFixed(2):''}</td>`;
+      tHTML+=`<td style="text-align:right">${line?line.cost.toFixed(2):''}</td>`;
+      tHTML+=`<td style="text-align:right">${cv?vc(cv):''}</td>`;
+      tHTML+=`<td>${r.purchOnly?'<span class="pill fail">FAIL</span>':pill(!costFail,!r.has||r.ic===null)}</td>`;
+      // Qty columns — only on first sub-row
+      tHTML+=`<td style="text-align:right">${f&&r.ipq!==null?r.ipq.toFixed(2):''}</td>`;
+      tHTML+=`<td style="text-align:right">${f&&r.has?r.pqSum.toFixed(2):''}</td>`;
+      tHTML+=`<td style="text-align:right">${f&&qv?vc(qv):''}</td>`;
+      tHTML+=`<td>${f?(r.purchOnly?'<span class="pill fail">FAIL</span>':pill(!r.qtyMis,!r.has||r.ipq===null)):''}</td>`;
       tHTML+=`</tr>`;
     });
   });
@@ -789,15 +793,16 @@ function buildResults(inv,purch,matched,matchedKeys){
       <button class="btn btn-s" onclick="goTab(3)" style="margin-left:auto">⇄ Mappings</button>
     </div>
     <div class="res-wrap"><table class="res-table">
+      <colgroup>
+        <col style="min-width:220px">
+        <col style="width:100px"><col style="width:110px"><col style="width:80px"><col style="width:70px">
+        <col style="width:80px"><col style="width:90px"><col style="width:90px"><col style="width:70px">
+      </colgroup>
       <thead>
         <tr>
-          <th rowspan="2">Item</th>
-          <th colspan="3" style="text-align:center;border-bottom:1px solid var(--border)">Unit Cost Check</th>
-          <th colspan="4" style="text-align:center;border-bottom:1px solid var(--border)">Purchase Qty Check</th>
-        </tr>
-        <tr>
-          <th>Inv Unit Cost</th><th>Purch Unit Cost</th><th>Check</th>
-          <th>Inv Qty</th><th>Purch Qty</th><th>Variance</th><th>Check</th>
+          <th>Item</th>
+          <th>Inv Unit Cost</th><th>Purch Unit Cost</th><th>Variance</th><th>Cost</th>
+          <th>Inv Qty</th><th>Purch Qty</th><th>Variance</th><th>Qty</th>
         </tr>
       </thead>
       <tbody id="resBody">${tHTML}</tbody>
