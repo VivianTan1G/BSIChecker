@@ -350,24 +350,29 @@ function parseMappingCsv(csv){
 }
 
 // ── Load entity mappings from Google Sheet ────────────────────────────────────
+// Published CSV URL loads by sheet name using the &sheet= param
 async function loadEntityMappings(entity){
   const tab=entityTabName(entity);
-  const url=SHEET_CSV_BASE+'&sheet='+encodeURIComponent(tab);
+  // The published CSV URL supports ?sheet=SheetName for named tabs
+  const baseUrl=SHEET_CSV_BASE.replace('?output=csv','');
+  const url=baseUrl+'?output=csv&sheet='+encodeURIComponent(tab);
   try{
     const r=await fetch(url);
     if(!r.ok) throw new Error('HTTP '+r.status);
     const csv=await r.text();
+    // If sheet not found, Google returns the first sheet — detect by checking header
+    const firstLine=csv.split('\n')[0]||'';
+    if(!firstLine.toLowerCase().includes('invoice_name')){
+      throw new Error('Tab not found or empty');
+    }
     const parsed=parseMappingCsv(csv);
-    // Merge preloaded seed with sheet data (sheet takes priority)
-    const preloaded=PRELOADED[entity]||{};
-    sheetMaps={...preloaded,...parsed.maps};
-    sheetCF={...parsed.cfs};
-    setStat('ok','Connected · '+Object.keys(sheetMaps).length+' mappings for '+entity);
+    sheetMaps=parsed.maps;
+    sheetCF=parsed.cfs;
+    setStat('ok','Connected · '+Object.keys(sheetMaps).length+' mappings loaded for '+entity);
   }catch(e){
-    // Fall back to preloaded only
-    sheetMaps=PRELOADED[entity]||{};
+    sheetMaps={};
     sheetCF={};
-    setStat('ok','Sheet unavailable · using '+Object.keys(sheetMaps).length+' preloaded mappings');
+    setStat('ok','No saved mappings yet for '+entity+' — will save on first run');
   }
 }
 
@@ -730,7 +735,7 @@ function vc(v){if(v===''||v==null)return'';const n=parseFloat(v);if(isNaN(n)||n=
 
 function buildResults(inv,purch,matched,matchedKeys){
   window._inv=inv; window._purch=purch; window._matched=matched; window._mkeys=matchedKeys;
-  let total=0,fCost=0,fQty=0,fBal=0,fUnmatched=0; const rows=[];
+  let total=0,fCost=0,fQty=0,fUnmatched=0; const rows=[];
   for(const[nk,d] of Object.entries(inv)){
     total++;
     const pr=matched[nk]||[], has=pr.length>0;
@@ -738,22 +743,20 @@ function buildResults(inv,purch,matched,matchedKeys){
     const pl=Object.values(cm), pqSum=pl.reduce((a,l)=>a+l.qty,0);
     const costMis=has&&pl.some(l=>Math.abs(l.cost-d.unitCost)>0.005);
     const qtyMis=has&&Math.abs(pqSum-d.purchQty)>0.001;
-    const iC=d.openQty+d.purchQty-d.closeQty, pC=has?d.openQty+pqSum-d.closeQty:null;
-    const balMis=pC!==null&&Math.abs(pC-iC)>0.001;
-    if(costMis)fCost++; if(qtyMis)fQty++; if(balMis)fBal++; if(!has)fUnmatched++;
-    rows.push({dn:d.displayName,nk,ic:d.unitCost,oq:d.openQty,cq:d.closeQty,ipq:d.purchQty,pl,pqSum,costMis,qtyMis,balMis,has,iC,pC,purchOnly:false});
+    if(costMis)fCost++; if(qtyMis)fQty++; if(!has)fUnmatched++;
+    rows.push({dn:d.displayName,nk,ic:d.unitCost,ipq:d.purchQty,pl,pqSum,costMis,qtyMis,has,purchOnly:false});
   }
   // Add purchase-only rows for items user chose to include in results
   for(const[rn,pr] of Object.entries(purch)){
     if(sessIgnored.has(rn)||matchedKeys.has(rn))continue;
-    if(!includeInResults.has(rn))continue; // only include if user explicitly chose to
+    if(!includeInResults.has(rn))continue;
     const cf=sheetCF[rn]||1;
     const converted=cf>1?pr.map(r=>({...r,qty:r.qty*cf,unitCost:r.unitCost/cf})):pr;
     const cm={}; for(const p of converted){const k=p.unitCost.toFixed(4);if(!cm[k])cm[k]={cost:p.unitCost,qty:0};cm[k].qty+=p.qty;}
     const pl=Object.values(cm); total++; fUnmatched++;
-    rows.push({dn:pr[0].displayName,nk:rn,ic:null,oq:null,cq:null,ipq:null,pl,pqSum:pl.reduce((a,l)=>a+l.qty,0),costMis:false,qtyMis:false,balMis:false,has:true,iC:null,pC:null,purchOnly:true});
+    rows.push({dn:pr[0].displayName,nk:rn,ic:null,ipq:null,pl,pqSum:pl.reduce((a,l)=>a+l.qty,0),costMis:false,qtyMis:false,has:true,purchOnly:true});
   }
-  const anyFail=r=>!intentUnmatched.has(r.nk)&&(r.purchOnly||r.costMis||r.qtyMis||r.balMis);
+  const anyFail=r=>r.purchOnly||r.costMis||r.qtyMis;
   let tHTML='';
   rows.forEach(r=>{
     const fail=anyFail(r);
@@ -763,21 +766,14 @@ function buildResults(inv,purch,matched,matchedKeys){
       const cf=line&&r.ic!==null?Math.abs(line.cost-r.ic)>0.005:false;
       const cv=line&&r.ic!==null?(line.cost-r.ic).toFixed(2):'';
       const qv=r.has&&r.ipq!==null?(r.pqSum-r.ipq).toFixed(2):'';
-      const bv=r.pC!==null&&r.iC!==null?(r.pC-r.iC).toFixed(2):'';
       tHTML+=`<tr class="${fail?'fr':''}" data-fail="${fail?1:0}">`;
       if(f){tHTML+=`<td rowspan="${sp}">${r.dn}${r.purchOnly?' <span style="font-size:10px;color:var(--fail);font-weight:700">NOT IN INVENTORY</span>':''}</td><td rowspan="${sp}">${r.ic!==null?r.ic.toFixed(2):''}</td>`;}
       tHTML+=`<td>${line?line.cost.toFixed(2):''}</td><td>${cv?vc(cv):''}</td><td>${r.purchOnly?'<span class="pill fail">FAIL</span>':pill(!cf,!r.has||r.ic===null)}</td>`;
       if(f){
-        tHTML+=`<td rowspan="${sp}">${r.oq!==null?r.oq.toFixed(2):''}</td>`;
         tHTML+=`<td rowspan="${sp}">${r.ipq!==null?r.ipq.toFixed(2):''}</td>`;
         tHTML+=`<td rowspan="${sp}">${r.has?r.pqSum.toFixed(2):''}</td>`;
         tHTML+=`<td rowspan="${sp}">${qv?vc(qv):''}</td>`;
-        tHTML+=`<td rowspan="${sp}">${pill(!r.qtyMis,!r.has||r.ipq===null)}</td>`;
-        tHTML+=`<td rowspan="${sp}">${r.cq!==null?r.cq.toFixed(2):''}</td>`;
-        tHTML+=`<td rowspan="${sp}">${r.iC!==null?r.iC.toFixed(2):''}</td>`;
-        tHTML+=`<td rowspan="${sp}">${r.pC!==null?r.pC.toFixed(2):''}</td>`;
-        tHTML+=`<td rowspan="${sp}">${bv?vc(bv):''}</td>`;
-        tHTML+=`<td rowspan="${sp}">${pill(!r.balMis,!r.has)}</td>`;
+        tHTML+=`<td rowspan="${sp}">${r.purchOnly?'<span class="pill fail">FAIL</span>':pill(!r.qtyMis,!r.has||r.ipq===null)}</td>`;
       }
       tHTML+=`</tr>`;
     });
@@ -788,8 +784,7 @@ function buildResults(inv,purch,matched,matchedKeys){
       <div class="stat"><div class="n">${total}</div><div class="l">Items</div></div><div class="sdiv"></div>
       <div class="stat"><div class="n" style="color:${fCost>0?'var(--fail)':'var(--pass)'}">${fCost}</div><div class="l">Cost Mismatch</div></div><div class="sdiv"></div>
       <div class="stat"><div class="n" style="color:${fQty>0?'var(--fail)':'var(--pass)'}">${fQty}</div><div class="l">Qty Mismatch</div></div><div class="sdiv"></div>
-      <div class="stat"><div class="n" style="color:${fBal>0?'var(--fail)':'var(--pass)'}">${fBal}</div><div class="l">Balance Mismatch</div></div><div class="sdiv"></div>
-      <div class="stat"><div class="n" style="color:${fUnmatched>0?'var(--warn)':'var(--pass)'}">${fUnmatched}</div><div class="l">Unmatched</div></div>
+      <div class="stat"><div class="n" style="color:${fUnmatched>0?'var(--warn)':'var(--pass)'}">${fUnmatched}</div><div class="l">Unmatched / Not in Inventory</div></div>
     </div>
     <div class="btn-row" style="margin-bottom:11px">
       <button class="btn btn-p" onclick="exportExcel()">↓ Export Excel</button>
@@ -800,16 +795,12 @@ function buildResults(inv,purch,matched,matchedKeys){
       <thead>
         <tr>
           <th rowspan="2">Item</th>
-          <th colspan="3" style="text-align:center;border-bottom:1px solid var(--border)">Unit Cost</th>
-          <th colspan="2" style="text-align:center;border-bottom:1px solid var(--border)">Qty</th>
-          <th colspan="4" style="text-align:center;border-bottom:1px solid var(--border)">Purchase Qty</th>
-          <th colspan="4" style="text-align:center;border-bottom:1px solid var(--border)">Balance (Open+Purch−Close)</th>
+          <th colspan="3" style="text-align:center;border-bottom:1px solid var(--border)">Unit Cost Check</th>
+          <th colspan="4" style="text-align:center;border-bottom:1px solid var(--border)">Purchase Qty Check</th>
         </tr>
         <tr>
-          <th>Inv Cost</th><th>Purch Cost</th><th>Check</th>
-          <th>Opening</th><th>Closing</th>
+          <th>Inv Unit Cost</th><th>Purch Unit Cost</th><th>Check</th>
           <th>Inv Qty</th><th>Purch Qty</th><th>Variance</th><th>Check</th>
-          <th>Inv COGS</th><th>Purch COGS</th><th>Variance</th><th>Check</th>
         </tr>
       </thead>
       <tbody id="resBody">${tHTML}</tbody>
@@ -887,9 +878,8 @@ function clearUD(row){const n=row.querySelector('.ud');if(n)n.remove();}
 function exportExcel(){
   const rows=window._rows; if(!rows)return;
   const wb=XLSX.utils.book_new();
-  const data=[['Entity: '+currentEntity],['Item','Inv Unit Cost','Purch Unit Cost','Cost Variance','Cost Check','Inv Purch Qty','Purch Total Qty','Qty Variance','Qty Check']];
+  const data=[['Entity: '+currentEntity],['Item','Inv Unit Cost','Purch Unit Cost','Cost Variance','Cost Check','Inv Qty','Purch Qty','Qty Variance','Qty Check']];
   rows.forEach(r=>{
-    if(r.purchOnly)return;
     (r.has?r.pl:[null]).forEach((line,li)=>{
       const f=li===0;
       const cf=line&&r.ic!==null?Math.abs(line.cost-r.ic)>0.005:false;
@@ -900,16 +890,16 @@ function exportExcel(){
         f&&r.ic!==null?r.ic:'',
         line?line.cost:'',
         cv,
-        !r.has?'':(cf?'FAIL':'PASS'),
+        r.purchOnly?'FAIL':(!r.has?'':(cf?'FAIL':'PASS')),
         f&&r.ipq!==null?r.ipq:'',
         f&&r.has?r.pqSum:'',
         f?qv:'',
-        f?(!r.has||r.ipq===null?'':(r.qtyMis?'FAIL':'PASS')):''
+        r.purchOnly?'FAIL':f?(!r.has||r.ipq===null?'':(r.qtyMis?'FAIL':'PASS')):''
       ]);
     });
   });
   const ws=XLSX.utils.aoa_to_sheet(data);
-  ws['!cols']=[{wch:30},{wch:14},{wch:14},{wch:14},{wch:12},{wch:14},{wch:14},{wch:14},{wch:12}];
+  ws['!cols']=[{wch:30},{wch:14},{wch:14},{wch:14},{wch:10},{wch:12},{wch:12},{wch:12},{wch:10}];
   XLSX.utils.book_append_sheet(wb,ws,'Results');
   XLSX.writeFile(wb,'BSI_'+currentEntity+'_'+new Date().toISOString().slice(0,10)+'.xlsx');
 }
