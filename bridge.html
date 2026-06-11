@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+<script>
+const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbx2Cox_EL7EXoTfFJtu8bVfU4i-mgzyVGsm8zt095p1pZOHWiLyMJo1aB7F1JyTQZcNXQ/exec';
+
+window.addEventListener('message', async function(e) {
+  if (e.data.type !== 'BSI_REQUEST') return;
+  const id = e.data.id;
+  try {
+    const url = SCRIPT_URL + '?' + new URLSearchParams(e.data.params);
+    const r = await fetch(url);
+    const json = await r.json();
+    e.source.postMessage({type:'BSI_RESPONSE', id:id, data:json}, e.origin);
+  } catch(err) {
+    e.source.postMessage({type:'BSI_RESPONSE', id:id, data:{status:'error', msg:err.message}}, e.origin);
+  }
+});
+
+window.parent.postMessage({type:'BSI_READY'}, '*');
+</script>
+</html>

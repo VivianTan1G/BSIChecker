@@ -147,6 +147,7 @@ input[type=file]{display:none}
     <option value="">— select entity —</option>
   </select>
   <span class="ecnt" id="ecnt"></span>
+  <button style="margin-left:8px;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);color:#fff;padding:4px 10px;font-family:monospace;font-size:10px;letter-spacing:.08em;text-transform:uppercase;cursor:pointer" onclick="testSheetLoad()">Test Sheet Load</button>
 </div>
 
 <div class="main">
@@ -350,33 +351,67 @@ function parseMappingCsv(csv){
 }
 
 // ── Load entity mappings from Google Sheet ────────────────────────────────────
-// Published CSV URL loads by sheet name using the &sheet= param
+// ── Bridge iframe for cross-origin Apps Script calls ─────────────────────────
+let _bridge = null;
+let _bridgeReady = false;
+let _pendingBridge = [];
+let _bridgeCallbacks = {};
+
+function initBridge(){
+  return new Promise(resolve=>{
+    if(_bridgeReady){resolve();return;}
+    _bridge=document.createElement('iframe');
+    _bridge.src='bridge.html';
+    _bridge.style.cssText='display:none;width:0;height:0;border:none;position:absolute';
+    document.body.appendChild(_bridge);
+    window.addEventListener('message',function onMsg(e){
+      if(e.data.type==='BSI_READY'){
+        _bridgeReady=true;
+        window.removeEventListener('message',onMsg);
+        resolve();
+      }
+    });
+    setTimeout(()=>{if(!_bridgeReady){showDebug('Bridge timeout','error');resolve();}},5000);
+  });
+}
+
+function bridgeCall(params){
+  return new Promise(async resolve=>{
+    await initBridge();
+    const id='bsi_'+Date.now()+'_'+Math.random().toString(36).slice(2);
+    window.addEventListener('message',function handler(e){
+      if(e.data.type==='BSI_RESPONSE'&&e.data.id===id){
+        window.removeEventListener('message',handler);
+        resolve(e.data.data);
+      }
+    });
+    _bridge.contentWindow.postMessage({type:'BSI_REQUEST',id,params},window.location.origin);
+    setTimeout(()=>resolve({status:'error',msg:'timeout'}),10000);
+  });
+}
+
+// ── Load entity mappings via bridge ──────────────────────────────────────────
 async function loadEntityMappings(entity){
   const tab=entityTabName(entity);
-  // The published CSV URL supports ?sheet=SheetName for named tabs
-  const baseUrl=SHEET_CSV_BASE.replace('?output=csv','');
-  const url=baseUrl+'?output=csv&sheet='+encodeURIComponent(tab);
-  try{
-    const r=await fetch(url);
-    if(!r.ok) throw new Error('HTTP '+r.status);
-    const csv=await r.text();
-    // If sheet not found, Google returns the first sheet — detect by checking header
-    const firstLine=csv.split('\n')[0]||'';
-    if(!firstLine.toLowerCase().includes('invoice_name')){
-      throw new Error('Tab not found or empty');
-    }
-    const parsed=parseMappingCsv(csv);
-    sheetMaps=parsed.maps;
-    sheetCF=parsed.cfs;
-    setStat('ok','Connected · '+Object.keys(sheetMaps).length+' mappings loaded for '+entity);
-  }catch(e){
-    sheetMaps={};
-    sheetCF={};
-    setStat('ok','No saved mappings yet for '+entity+' — will save on first run');
+  showDebug('Reading tab: '+tab);
+  const data=await bridgeCall({action:'read',tab});
+  if(data.status==='ok'){
+    sheetMaps={}; sheetCF={};
+    (data.mappings||[]).forEach(m=>{
+      const k=norm(m.invoice_name);
+      sheetMaps[k]=m.inventory_name;
+      sheetCF[k]=parseFloat(m.conversion_factor)||1;
+    });
+    showDebug('Loaded '+Object.keys(sheetMaps).length+' mappings for '+entity);
+    setStat('ok','Connected · '+Object.keys(sheetMaps).length+' mappings for '+entity);
+  }else{
+    showDebug('Read error: '+(data.msg||'unknown'),'error');
+    sheetMaps={}; sheetCF={};
+    setStat('err','Error: '+(data.msg||'unknown'));
   }
 }
 
-// ── Write mappings to Google Sheet ───────────────────────────────────────────
+// ── Write mappings via bridge ─────────────────────────────────────────────────
 function showDebug(msg, type='info'){
   let panel=document.getElementById('debugPanel');
   if(!panel){
@@ -400,35 +435,16 @@ function showDebug(msg, type='info'){
 async function writeToSheet(entity, items){
   const tab=entityTabName(entity);
   const payload={tab, mappings:items.map(m=>({invoice_name:m.inv,inventory_name:m.tgt,conversion_factor:m.cf||1}))};
-  showDebug('Writing to tab: '+tab+' ('+items.length+' item(s))');
-  showDebug('Entity: '+entity);
-  showDebug('Payload: '+JSON.stringify(payload).substring(0,120)+'...');
-
-  // Method 1: GET with URL parameter (most reliable for Apps Script)
-  try{
-    const url=WRITE_URL+'?data='+encodeURIComponent(JSON.stringify(payload));
-    showDebug('Trying GET method...');
-    const r=await fetch(url,{method:'GET'});
-    const text=await r.text();
-    showDebug('Response: '+text.substring(0,100));
-    if(text.includes('"ok"')||text.includes('ok')){
-      showDebug('✓ Saved successfully via GET');
-      return true;
-    }
-    throw new Error('Response: '+text);
-  }catch(e1){
-    showDebug('GET failed: '+e1.message,'warn');
-    // Method 2: POST with no-cors
-    try{
-      showDebug('Trying POST no-cors...');
-      await fetch(WRITE_URL,{method:'POST',mode:'no-cors',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
-      showDebug('POST sent (no-cors — cannot verify response)','warn');
-      return true;
-    }catch(e2){
-      showDebug('POST failed: '+e2.message,'error');
-      toast('Write failed — see debug panel');
-      return false;
-    }
+  showDebug('Writing '+items.length+' mapping(s) to '+tab);
+  const data=await bridgeCall({data:JSON.stringify(payload)});
+  if(data.status==='ok'){
+    showDebug('✓ Written '+data.written+' mapping(s)');
+    toast(items.length+' mapping(s) saved');
+    return true;
+  }else{
+    showDebug('Write error: '+(data.msg||'unknown'),'error');
+    toast('Write failed: '+(data.msg||'unknown'));
+    return false;
   }
 }
 
@@ -473,6 +489,15 @@ function init(){
   sel.innerHTML='<option value="">— select entity —</option>'+ENTITIES.map(e=>`<option value="${e}">${e}</option>`).join('');
   document.getElementById('ecnt').textContent=ENTITIES.length+' entities';
   setStat('ok','Ready · select entity to load mappings');
+}
+
+async function testSheetLoad(){
+  if(!currentEntity){toast('Select an entity first');return;}
+  showDebug('=== TEST SHEET LOAD ===');
+  showDebug('Entity: '+currentEntity);
+  showDebug('Tab name: '+entityTabName(currentEntity));
+  await loadEntityMappings(currentEntity);
+  showDebug('sheetMaps keys: '+Object.keys(sheetMaps).slice(0,5).join(', ')+(Object.keys(sheetMaps).length>5?'...':''));
 }
 
 async function onEntityChange(){
