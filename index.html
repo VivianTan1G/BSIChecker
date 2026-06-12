@@ -551,24 +551,63 @@ async function runAnalysis(){
   const invNames=Object.keys(inv), invCands=invNames.map(n=>({name:n}));
   const matched={}, unmatched=[], matchedKeys=new Set();
 
+  const fuzzyToSave = [];
   for(const[rn,rows] of Object.entries(purch)){
     if(sessIgnored.has(norm(rn)))continue;
     const cf=sheetCF[norm(rn)]||1;
-    // cf > 1 means invoice is in cartons: multiply qty, divide unit cost
     const converted=cf>1?rows.map(r=>({...r,qty:r.qty*cf,unitCost:r.unitCost/cf})):rows;
     const mp=getMap(rn);
     if(mp&&inv[norm(mp)]){matched[norm(mp)]=(matched[norm(mp)]||[]);matched[norm(mp)].push(...converted);matchedKeys.add(norm(rn));}
     else{
       const fz=fuzzy(norm(rn),invCands);
-      if(fz){matched[fz]=(matched[fz]||[]);matched[fz].push(...converted);matchedKeys.add(norm(rn));}
+      if(fz){
+        matched[fz]=(matched[fz]||[]);matched[fz].push(...converted);matchedKeys.add(norm(rn));
+        // save fuzzy match to sheet if not already saved
+        if(!sheetMaps[norm(rn)]) fuzzyToSave.push({inv:norm(rn), tgt:fz, cf:cf});
+      }
       else unmatched.push({rawName:rn,rows});
     }
+  }
+  // Save new fuzzy matches to Google Sheet (deduplicated, with timestamp)
+  if(fuzzyToSave.length>0){
+    const seen=new Set();
+    const deduped=fuzzyToSave.filter(m=>{if(seen.has(m.inv))return false;seen.add(m.inv);return true;});
+    deduped.forEach(m=>{sheetMaps[m.inv]=m.tgt; sheetCF[m.inv]=m.cf;});
+    saveFuzzyToSheet(deduped);
   }
   if(unmatched.length) await showMatchModal(unmatched,invNames,inv,matched,purch,matchedKeys);
   else buildResults(inv,purch,matched,matchedKeys);
 }
 
-// ── Match Modal (improved with suggestions + search) ──────────────────────────
+function sgtNow(){
+  return new Date().toLocaleString('en-SG',{timeZone:'Asia/Singapore',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
+}
+
+async function saveFuzzyToSheet(items){
+  if(!currentEntity||!items.length) return;
+  const tab=entityTabName(currentEntity);
+  const payload={
+    tab,
+    mappings: items.map(m=>({
+      invoice_name:      m.inv,
+      inventory_name:    m.tgt,
+      conversion_factor: m.cf||1,
+      updated_at:        sgtNow(),
+      match_type:        'fuzzy'
+    }))
+  };
+  showDebug('Saving '+items.length+' fuzzy match(es) to sheet');
+  try{
+    const r=await fetch(API_URL+'?data='+encodeURIComponent(JSON.stringify(payload)));
+    const data=await r.json();
+    if(data.status==='ok'){
+      showDebug('✓ '+items.length+' fuzzy match(es) saved');
+      toast(items.length+' fuzzy match(es) saved to sheet');
+    }else throw new Error(data.msg||'Write failed');
+  }catch(e){
+    showDebug('Fuzzy save failed: '+e.message,'warn');
+  }
+}
 let _matchInv = {};  // store inventory for search
 let _matchInvNames = [];
 
